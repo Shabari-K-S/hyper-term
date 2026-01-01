@@ -1,73 +1,111 @@
+/* src/App.css */
+
 @font-face {
-  font-family: 'TermFont'; /* We give it a custom name */
-  src: url('./assets/fonts/JetBrainsMonoNerdFont-Regular.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
+  font-family: "TermFont";
+  src: url("./assets/fonts/JetBrainsMonoNerdFont-Regular.ttf");
 }
 
 /* Global Reset */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-
-/* 1. Main Application Window */
 .app-container {
+  user-select: none;
   display: flex;
   flex-direction: column;
   height: 100vh;
   width: 100vw;
-  /* MASTER COLOR: This matches the default terminal theme exactly */
-  background-color: #1e1e2e; 
-  color: #cdd6f4;
+  background-color: #1e1e2e; /* Catppuccin Base */
+  color: #cdd6f4;            /* Catppuccin Text */
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
   overflow: hidden;
-  font-family: 'TermFont', 'JetBrains Mono', monospace;
-
-  /* Optional: Smooth rounded corners for the OS window */
-  border-radius: 8px; 
-  border: 1px solid #313244; /* Subtle border to define window edges */
+  
+  /* ROUNDED CORNERS CONFIG */
+  border-radius: 12px; 
+  border: 1px solid #313244; /* Subtle Border */
 }
 
-/* 2. Seamless Title Bar */
+/* --- TITLE BAR --- */
 .title-bar {
-  height: 36px;
-  /* Same color as app-container for seamless look, or #181825 for contrast */
-  background-color: #1e1e2e; 
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 12px;
-  user-select: none; /* Dragging shouldn't select text */
-  /* Subtle separator line - remove this line if you want it 100% flat */
-  border-bottom: 1px solid #313244; 
+  align-items: flex-end; /* Align tabs to bottom */
+  height: 44px;          /* COMFORT SIZE */
+  background-color: #1e1e2e;
+  border-bottom: 1px solid #313244;
+  width: 100%;
+  padding-top: 4px;      /* Space at top */
 }
 
-.title-drag-region {
-  flex: 1;
+/* 1. TABS SECTION */
+.title-section-tabs {
+  display: flex;
+  align-items: flex-end;
+  padding-left: 12px;
   height: 100%;
-  display: flex;
-  align-items: center;
+  z-index: 20;
 }
 
-.app-title {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: #a6adc8; /* Muted text color */
+.tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  text-transform: uppercase;
-  opacity: 0.8;
+  gap: 10px;
+  padding: 0 16px;       /* Wider tabs */
+  background-color: transparent;
+  color: #6c7086;
+  font-size: 13px;       /* Readable Font */
+  font-weight: 500;
+  cursor: pointer;
+  height: 36px;          /* Taller Tabs */
+  margin-right: 2px;
+  border-radius: 8px 8px 0 0; /* Smooth Tab Corners */
+  transition: all 0.2s;
+  min-width: 140px;
+  max-width: 220px;
+}
+.tab:hover { background-color: #313244; color: #fff; }
+
+.tab.active {
+  background-color: #1e1e2e; /* Matches body */
+  color: #fff;
+  font-weight: 600;
+  height: 38px;          /* Active overlaps border */
+  border: 1px solid #313244;
+  border-bottom: none;   /* Seamless look */
+  z-index: 30;
 }
 
-/* 3. Window Control Buttons */
-.window-controls {
+.tab-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.tab-close-btn { opacity: 0; padding: 4px; border-radius: 4px; display: flex; align-items: center;}
+.tab:hover .tab-close-btn { opacity: 1; }
+.tab-close-btn:hover { background-color: #45475a; color: #f38ba8; }
+
+.new-tab-btn {
+  padding: 8px;
+  color: #6c7086;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  margin-left: 6px;
+  margin-bottom: 6px; /* Align with tab center */
+}
+.new-tab-btn:hover { background-color: #313244; color: #a6e3a1; }
+
+/* 2. DRAG HANDLE (Middle) */
+.title-section-drag {
+  flex-grow: 1;
+  height: 100%;
+  min-width: 40px;
+  /* This creates the draggable area */
+}
+
+/* 3. WINDOW CONTROLS (Right) */
+.title-section-controls {
   display: flex;
+  align-items: center;
   gap: 6px;
-  z-index: 50; /* Ensure clickable */
+  padding-right: 12px;
+  padding-bottom: 6px; /* Center vertically in header */
+  z-index: 50;
 }
 
 .control-btn {
@@ -75,146 +113,24 @@
   border: none;
   color: #6c7086;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s;
 }
+.control-btn:hover { background-color: #313244; color: #fff; }
+.control-btn.close:hover { background-color: #f38ba8; color: #1e1e2e; }
 
-.control-btn:hover {
-  background-color: #313244;
-  color: #ffffff;
-}
-
-.control-btn.close:hover {
-  background-color: #f38ba8; /* Red hover for close button */
-  color: #1e1e2e;
-}
-
-/* 4. Terminal Wrapper */
+/* TERMINAL BODY */
 .terminal-wrapper {
   flex: 1;
   position: relative;
   overflow: hidden;
-  /* Padding creates the "breathing room" inside the window */
-  padding: 8px 0 0 12px; 
-  background-color: transparent; /* Ensures the #1e1e2e shows through */
+  padding: 8px 0 0 12px; /* Internal Padding */
 }
 
-/* 5. Custom Scrollbar Styling (Webkit) */
-/* This prevents the ugly white scrollbar from appearing */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: #45475a;
-  border-radius: 5px;
-  border: 2px solid #1e1e2e; /* Creates padding effect */
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: #585b70;
-}
-
-/* TAB BAR AREA */
-.tab-scroll-container {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  overflow-x: auto;
-  margin-right: 8px; /* Space for window controls */
-  scrollbar-width: none; /* Hide scrollbar */
-}
-
-.tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  margin-right: 2px;
-  background-color: transparent;
-  border-radius: 6px 6px 0 0;
-  color: #6c7086;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-  border: 1px solid transparent;
-  border-bottom: none;
-  max-width: 200px;
-  min-width: 120px;
-  height: 30px; /* Fit inside the 36px title bar */
-  position: relative;
-}
-
-.tab:hover {
-  background-color: #313244;
-  color: #cdd6f4;
-}
-
-.tab.active {
-  background-color: #1e1e2e; /* Matches app background */
-  color: #fff;
-  border-color: #313244;
-  font-weight: 600;
-}
-
-/* Subtle separator line for inactive tabs */
-.tab::after {
-  content: '';
-  position: absolute;
-  right: -1px;
-  height: 14px;
-  width: 1px;
-  background-color: #313244;
-}
-.tab.active::after, .tab:last-child::after {
-  display: none;
-}
-
-.tab-title {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tab-close-btn {
-  opacity: 0;
-  padding: 2px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.tab:hover .tab-close-btn {
-  opacity: 1;
-}
-.tab-close-btn:hover {
-  background-color: #45475a;
-  color: #f38ba8;
-}
-
-/* New Tab Button (+) */
-.new-tab-btn {
-  padding: 4px 8px;
-  margin-left: 4px;
-  color: #6c7086;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.new-tab-btn:hover {
-  background-color: #313244;
-  color: #a6e3a1; /* Green hover */
-}
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background-color: #45475a; border-radius: 6px; border: 3px solid #1e1e2e; }
