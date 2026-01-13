@@ -2,7 +2,10 @@
 
 @font-face {
   font-family: "TermFont";
-  src: url("./assets/fonts/JetBrainsMonoNerdFont-Regular.ttf");
+  src: url("./assets/fonts/JetBrainsMonoNerdFont-Regular.ttf") format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
 }
 
 /* Global Reset */
@@ -20,7 +23,7 @@
   width: 100vw;
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: 'TermFont', monospace;
   overflow: hidden;
 
   /* ROUNDED CORNERS CONFIG */

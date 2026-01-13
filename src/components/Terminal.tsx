@@ -24,7 +24,7 @@ export const TerminalPane = ({ id, visible, command, args, onExit }: { id: strin
     // Initialize with default theme temporarily, will update async
     const term = new XTerm({
       theme: DEFAULT_THEME,
-      fontFamily: '"TermFont", "JetBrains Mono", monospace',
+      fontFamily: '"TermFont", monospace',
       fontSize: 14,
       lineHeight: 1.2,
       cursorBlink: true,
