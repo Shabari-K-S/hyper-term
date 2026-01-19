@@ -3,7 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Copy, Clipboard } from 'lucide-react';
+import { Copy, Clipboard, SplitSquareHorizontal, SplitSquareVertical } from 'lucide-react';
 import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 import '@xterm/xterm/css/xterm.css';
 
@@ -14,7 +14,16 @@ import { loadThemeId } from '../lib/store';
 // Default fallback if loading fails
 const DEFAULT_THEME = PRESET_THEMES[0];
 
-export const TerminalPane = ({ id, visible, command, args, onExit }: { id: string, visible: boolean, command?: string, args?: string[], onExit?: () => void }) => {
+interface TerminalPaneProps {
+  id: string;
+  visible: boolean;
+  command?: string;
+  args?: string[];
+  onExit?: () => void;
+  onSplit?: (direction: 'horizontal' | 'vertical') => void;
+}
+
+export const TerminalPane = ({ id, visible, command, args, onExit, onSplit }: TerminalPaneProps) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -88,6 +97,25 @@ export const TerminalPane = ({ id, visible, command, args, onExit }: { id: strin
           }
           return false;
         }
+
+        // Split Right: Ctrl+Shift+E
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'e') {
+          if (event.type === 'keydown' && onSplit) {
+            onSplit('horizontal');
+            return false;
+          }
+          return false;
+        }
+
+        // Split Down: Ctrl+Shift+O
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+          if (event.type === 'keydown' && onSplit) {
+            onSplit('vertical');
+            return false;
+          }
+          return false;
+        }
+
         return true;
       });
 
@@ -176,6 +204,20 @@ export const TerminalPane = ({ id, visible, command, args, onExit }: { id: strin
         if (text) {
           invoke('write_to_pty', { id, data: text });
         }
+      }
+    },
+    {
+      label: 'Split Right',
+      icon: SplitSquareHorizontal,
+      action: () => {
+        if (onSplit) onSplit('horizontal');
+      }
+    },
+    {
+      label: 'Split Down',
+      icon: SplitSquareVertical,
+      action: () => {
+        if (onSplit) onSplit('vertical');
       }
     }
   ];

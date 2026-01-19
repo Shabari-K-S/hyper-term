@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { TerminalPane } from "./components/Terminal";
 import { Settings as SettingsComponent } from "./components/Settings";
 import { WelcomePage } from "./components/WelcomePage";
+import { PaneContainer } from "./components/PaneContainer";
 import { ChevronDown, Settings, Minus, Square, X, Plus, TerminalSquare, Settings as SettingsIcon } from "lucide-react";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import "./App.css";
 import { DEFAULT_PROFILES } from './config/profiles';
 import { PRESET_THEMES, Theme } from './config/themes';
 import { Profile, SSHProfile } from './types';
+import { PaneNode, createTerminalPane, generatePaneId } from './types/pane';
 import { loadSSHProfiles, loadThemeId } from './lib/store';
 import { listen } from '@tauri-apps/api/event';
 
@@ -30,20 +31,62 @@ const applyTheme = (theme: Theme) => {
 
 const DEFAULT_THEME = PRESET_THEMES[0];
 
-const generateId = () => `term-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
 interface Tab {
   id: string;
   type: 'terminal' | 'settings';
   title: string;
-  command?: string;
-  args?: string[];
+  rootPane?: PaneNode;
 }
+
+// Helper to find and replace a pane node by ID
+const updatePaneTree = (
+  root: PaneNode,
+  targetId: string,
+  updater: (pane: PaneNode) => PaneNode | null
+): PaneNode | null => {
+  if (root.type === 'terminal' && root.id === targetId) {
+    return updater(root);
+  }
+  if (root.type === 'split') {
+    const newChildren: [PaneNode, PaneNode] = [...root.children];
+    for (let i = 0; i < 2; i++) {
+      const child = newChildren[i];
+      if (child.type === 'terminal' && child.id === targetId) {
+        const result = updater(child);
+        if (result === null) {
+          // Return the other child (collapse split)
+          return newChildren[1 - i];
+        }
+        newChildren[i] = result;
+        return { ...root, children: newChildren };
+      } else if (child.type === 'split') {
+        const updated = updatePaneTree(child, targetId, updater);
+        if (updated === null) {
+          // Child was removed, return the other
+          return newChildren[1 - i];
+        }
+        if (updated !== child) {
+          newChildren[i] = updated;
+          return { ...root, children: newChildren };
+        }
+      }
+    }
+  }
+  return root;
+};
+
+// Get first terminal pane ID from tree
+const getFirstPaneId = (pane: PaneNode): string => {
+  if (pane.type === 'terminal') return pane.id;
+  return getFirstPaneId(pane.children[0]);
+};
 
 function App() {
   const appWindow = getCurrentWindow();
-  const [tabs, setTabs] = useState<Tab[]>([{ id: 'init-1', type: 'terminal', title: 'Terminal' }]);
-  const [activeId, setActiveId] = useState('init-1');
+  const initialPane = createTerminalPane();
+  const [tabs, setTabs] = useState<Tab[]>([{ id: 'init-1', type: 'terminal', title: 'Terminal', rootPane: initialPane }]);
+  const [activeTabId, setActiveTabId] = useState('init-1');
+  const [activePaneId, setActivePaneId] = useState(initialPane.id);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [sshProfiles, setSshProfiles] = useState<SSHProfile[]>([]);
   const profileMenuRef = useRef<HTMLDivElement>(null);
@@ -82,7 +125,7 @@ function App() {
   }, []);
 
   const addTab = (options?: Partial<Tab> & { profile?: Profile }) => {
-    const newId = generateId();
+    const newId = generatePaneId();
     let newTab: Tab;
 
     if (options?.type === 'settings') {
@@ -99,17 +142,18 @@ function App() {
         args.push(`${options.profile.username}@${options.profile.host}`);
       }
 
+      const termPane = createTerminalPane(command, args);
       newTab = {
         id: newId,
         type: 'terminal',
         title: options?.profile ? options.profile.name : 'Terminal',
-        command,
-        args
+        rootPane: termPane
       };
+      setActivePaneId(termPane.id);
     }
 
     setTabs([...tabs, newTab]);
-    setActiveId(newId);
+    setActiveTabId(newId);
     setShowProfileMenu(false);
   };
 
@@ -117,19 +161,46 @@ function App() {
     e.stopPropagation();
     const newTabs = tabs.filter(t => t.id !== id);
     setTabs(newTabs);
-    if (id === activeId && newTabs.length > 0) {
-      setActiveId(newTabs[newTabs.length - 1].id);
+    if (id === activeTabId && newTabs.length > 0) {
+      setActiveTabId(newTabs[newTabs.length - 1].id);
+      const lastTab = newTabs[newTabs.length - 1];
+      if (lastTab.rootPane) {
+        setActivePaneId(getFirstPaneId(lastTab.rootPane));
+      }
     }
   };
 
-  const handleTabExit = (id: string) => {
-    if (tabs.length === 1) {
-      setTabs([]);
-    } else {
-      const newTabs = tabs.filter(t => t.id !== id);
-      setTabs(newTabs);
-      if (id === activeId) setActiveId(newTabs[newTabs.length - 1].id);
-    }
+  const handlePaneClose = (paneId: string) => {
+    setTabs(prevTabs => prevTabs.map(tab => {
+      if (tab.type !== 'terminal' || !tab.rootPane) return tab;
+
+      // If it's the only pane, close the tab
+      if (tab.rootPane.type === 'terminal' && tab.rootPane.id === paneId) {
+        return { ...tab, rootPane: undefined }; // Mark for removal
+      }
+
+      const newRoot = updatePaneTree(tab.rootPane, paneId, () => null);
+      return { ...tab, rootPane: newRoot || undefined };
+    }).filter(tab => tab.type === 'settings' || tab.rootPane !== undefined));
+  };
+
+  const handleSplit = (paneId: string, direction: 'horizontal' | 'vertical') => {
+    setTabs(prevTabs => prevTabs.map(tab => {
+      if (tab.type !== 'terminal' || !tab.rootPane) return tab;
+
+      const newRoot = updatePaneTree(tab.rootPane, paneId, (targetPane) => {
+        if (targetPane.type !== 'terminal') return targetPane;
+        const newPane = createTerminalPane(targetPane.command, targetPane.args);
+        setActivePaneId(newPane.id);
+        return {
+          type: 'split',
+          direction,
+          children: [targetPane, newPane]
+        };
+      });
+
+      return { ...tab, rootPane: newRoot || tab.rootPane };
+    }));
   };
 
   const allProfiles: Profile[] = [...DEFAULT_PROFILES, ...sshProfiles];
@@ -141,13 +212,18 @@ function App() {
           {tabs.map((tab) => (
             <div
               key={tab.id}
-              className={`tab ${activeId === tab.id ? 'active' : ''}`}
-              onClick={() => setActiveId(tab.id)}
+              className={`tab ${activeTabId === tab.id ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTabId(tab.id);
+                if (tab.rootPane) {
+                  setActivePaneId(getFirstPaneId(tab.rootPane));
+                }
+              }}
             >
               {tab.type === 'settings' ? (
-                <SettingsIcon size={14} className={activeId === tab.id ? "text-blue-400" : "text-gray-500"} />
+                <SettingsIcon size={14} className={activeTabId === tab.id ? "text-blue-400" : "text-gray-500"} />
               ) : (
-                <TerminalSquare size={14} className={activeId === tab.id ? "text-blue-400" : "text-gray-500"} />
+                <TerminalSquare size={14} className={activeTabId === tab.id ? "text-blue-400" : "text-gray-500"} />
               )}
               <span className="tab-title">{tab.title}</span>
               <div className="tab-close-btn" onClick={(e) => closeTab(e, tab.id)}>
@@ -205,18 +281,18 @@ function App() {
           />
         ) : (
           tabs.map((tab) => (
-            <div key={tab.id} style={{ display: activeId === tab.id ? 'block' : 'none', height: '100%', width: '100%' }}>
-              {tab.type === 'terminal' ? (
-                <TerminalPane
-                  id={tab.id}
-                  visible={activeId === tab.id}
-                  command={tab.command}
-                  args={tab.args}
-                  onExit={() => handleTabExit(tab.id)}
+            <div key={tab.id} style={{ display: activeTabId === tab.id ? 'flex' : 'none', height: '100%', width: '100%' }}>
+              {tab.type === 'terminal' && tab.rootPane ? (
+                <PaneContainer
+                  pane={tab.rootPane}
+                  activePaneId={activePaneId}
+                  onPaneClick={setActivePaneId}
+                  onSplit={handleSplit}
+                  onClose={handlePaneClose}
                 />
-              ) : (
+              ) : tab.type === 'settings' ? (
                 <SettingsComponent />
-              )}
+              ) : null}
             </div>
           ))
         )}
