@@ -1,10 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { Copy, Clipboard } from 'lucide-react';
+import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 import '@xterm/xterm/css/xterm.css';
 
+import { ContextMenu } from './ContextMenu';
 import { PRESET_THEMES } from '../config/themes';
 import { loadThemeId } from '../lib/store';
 
@@ -13,88 +16,184 @@ const DEFAULT_THEME = PRESET_THEMES[0];
 
 export const TerminalPane = ({ id, visible, command, args, onExit }: { id: string, visible: boolean, command?: string, args?: string[], onExit?: () => void }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null); // Store addon ref to call fit() later
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const xtermRef = useRef<XTerm | null>(null);
+
+  // Context Menu State
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [cachedSelection, setCachedSelection] = useState('');
 
   // Helper to find theme by ID
-  const getTheme = (id: string | null) => PRESET_THEMES.find(t => t.id === id) || DEFAULT_THEME;
+  const getTheme = (themeId: string | null) => PRESET_THEMES.find(t => t.id === themeId) || DEFAULT_THEME;
 
   useEffect(() => {
     if (!terminalRef.current) return;
 
-    // Initialize with default theme temporarily, will update async
-    const term = new XTerm({
-      theme: DEFAULT_THEME,
-      fontFamily: '"TermFont", monospace',
-      fontSize: 14,
-      lineHeight: 1.2,
-      cursorBlink: true,
-      allowProposedApi: true,
-      allowTransparency: false,
-    });
+    let isMounted = true;
+    let termInstance: XTerm | null = null;
+    let cleanupFns: (() => void)[] = [];
 
-    // Load saved theme and apply
-    loadThemeId().then(id => {
-      term.options.theme = getTheme(id);
-    });
+    const init = async () => {
+      const initialThemeId = await loadThemeId();
+      if (!isMounted || !terminalRef.current) return;
 
-    // Listen for theme changes
-    const unlistenTheme = listen('theme-changed', (event: any) => {
-      const newThemeId = event.payload;
-      term.options.theme = getTheme(newThemeId);
-    });
+      const initialTheme = getTheme(initialThemeId);
+      const term = new XTerm({
+        theme: initialTheme,
+        fontFamily: '"TermFont", monospace',
+        fontSize: 14,
+        lineHeight: 1.2,
+        cursorBlink: true,
+        allowProposedApi: true,
+        allowTransparency: false,
+      });
 
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    fitAddonRef.current = fitAddon; // Save it
+      xtermRef.current = term;
+      termInstance = term;
 
-    term.open(terminalRef.current);
-    term.clear();
+      // Track selection changes
+      term.onSelectionChange(() => {
+        const sel = term.getSelection();
+        if (sel) {
+          setCachedSelection(sel);
+        }
+      });
 
-    // Initial fit
-    setTimeout(() => fitAddon.fit(), 50);
+      // Keyboard Copy/Paste Support (Ctrl+Shift+C / Ctrl+Shift+V)
+      term.attachCustomKeyEventHandler((event) => {
+        // Copy: Ctrl+Shift+C
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'c') {
+          if (event.type === 'keydown') {
+            const selection = term.getSelection();
+            if (selection) {
+              writeText(selection).catch(err => console.error('Copy failed', err));
+              return false;
+            }
+          }
+          return false;
+        }
 
-    const handleResize = () => fitAddon.fit();
-    window.addEventListener('resize', handleResize);
+        // Paste: Ctrl+Shift+V
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'v') {
+          if (event.type === 'keydown') {
+            readText()
+              .then(text => {
+                if (text) {
+                  invoke('write_to_pty', { id, data: text });
+                }
+              })
+              .catch(err => console.error('Paste failed', err));
+            return false;
+          }
+          return false;
+        }
+        return true;
+      });
 
-    // Backend Logic
-    invoke('create_pty_session', { id, command, args });
+      const unlistenTheme = await listen<string>('theme-changed', (event) => {
+        term.options.theme = getTheme(event.payload);
+      });
+      cleanupFns.push(() => unlistenTheme());
 
-    const unlistenData = listen(`pty-data-${id}`, (event: any) => {
-      term.write(event.payload);
-    });
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      fitAddonRef.current = fitAddon;
 
-    const unlistenExit = listen(`pty-exit-${id}`, () => {
-      if (onExit) onExit();
-    });
+      term.open(terminalRef.current);
+      term.clear();
 
-    const onDataDisposable = term.onData((data) => {
-      invoke('write_to_pty', { id, data });
-    });
+      // Initial fit
+      setTimeout(() => fitAddon.fit(), 50);
+
+      const handleResize = () => fitAddon.fit();
+      window.addEventListener('resize', handleResize);
+      cleanupFns.push(() => window.removeEventListener('resize', handleResize));
+
+      invoke('create_pty_session', { id, command, args });
+
+      const unlistenData = await listen<string>(`pty-data-${id}`, (event) => {
+        term.write(event.payload);
+      });
+      cleanupFns.push(() => unlistenData());
+
+      const unlistenExit = await listen(`pty-exit-${id}`, () => {
+        if (onExit) onExit();
+      });
+      cleanupFns.push(() => unlistenExit());
+
+      const onDataDisposable = term.onData((data) => {
+        invoke('write_to_pty', { id, data });
+      });
+      cleanupFns.push(() => onDataDisposable.dispose());
+    };
+
+    init();
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      onDataDisposable.dispose();
-      term.dispose();
-      unlistenData.then(f => f());
-      unlistenExit.then(f => f());
-      unlistenTheme.then(f => f());
+      isMounted = false;
+      cleanupFns.forEach(fn => fn());
+      if (termInstance) termInstance.dispose();
     };
   }, [id]);
 
-  // NEW: Refit whenever the tab becomes visible
+  // Refit whenever the tab becomes visible
   useEffect(() => {
     if (visible && fitAddonRef.current) {
-      // Small timeout to allow CSS 'display: block' to render first
       setTimeout(() => {
         fitAddonRef.current?.fit();
       }, 10);
     }
   }, [visible]);
 
+  // Context Menu Handler
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Capture current selection before menu opens
+    const currentSelection = xtermRef.current?.getSelection();
+    if (currentSelection) {
+      setCachedSelection(currentSelection);
+    }
+    setMenuPos({ x: e.clientX, y: e.clientY });
+    setMenuVisible(true);
+  };
+
+  const menuActions = [
+    {
+      label: 'Copy',
+      icon: Copy,
+      action: async () => {
+        if (cachedSelection) {
+          await writeText(cachedSelection);
+        }
+      }
+    },
+    {
+      label: 'Paste',
+      icon: Clipboard,
+      action: async () => {
+        const text = await readText();
+        if (text) {
+          invoke('write_to_pty', { id, data: text });
+        }
+      }
+    }
+  ];
+
   return (
-    <div
-      ref={terminalRef}
-      style={{ width: '100%', height: '100%', backgroundColor: '#1e1e2e' }}
-    />
+    <>
+      <div
+        ref={terminalRef}
+        className="terminal-container"
+        onContextMenu={handleContextMenu}
+      />
+      <ContextMenu
+        x={menuPos.x}
+        y={menuPos.y}
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        actions={menuActions}
+      />
+    </>
   );
 };

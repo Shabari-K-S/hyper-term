@@ -26,3 +26,4 @@ portable-pty = "0.8"
 tokio = { version = "1", features = ["full"] }
 base64 = "0.21"
 tauri-plugin-store = "2.0.0-beta"
+tauri-plugin-clipboard-manager = "2.3.2"
